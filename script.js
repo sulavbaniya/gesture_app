@@ -1,11 +1,17 @@
 const videoElement = document.getElementById('video');
-const canvasElement = document.getElementById('canvas');
-const canvasCtx = canvasElement.getContext('2d');
+const videoCanvas = document.getElementById('video-canvas');
+const drawCanvas = document.getElementById('draw-canvas');
 
-videoElement.width = 640;
-videoElement.height = 480;
-canvasElement.width = 640;
-canvasElement.height = 480;
+const videoCtx = videoCanvas.getContext('2d');
+const drawCtx = drawCanvas.getContext('2d');
+
+videoCanvas.width = drawCanvas.width = videoElement.width = 640;
+videoCanvas.height = drawCanvas.height = videoElement.height = 480;
+videoCanvas.width = drawCanvas.width = videoElement.width = 960;
+videoCanvas.height = drawCanvas.height = videoElement.height = 720;
+let isDrawing = false;
+let lastX = null;
+let lastY = null;
 
 const hands = new Hands({
   locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
@@ -15,52 +21,70 @@ hands.setOptions({
   maxNumHands: 1,
   modelComplexity: 1,
   minDetectionConfidence: 0.8,
-  minTrackingConfidence: 0.7
+  minTrackingConfidence: 0.8
 });
 
 hands.onResults((results) => {
-  canvasCtx.save();
-  canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-  canvasCtx.translate(canvasElement.width, 0);
-  canvasCtx.scale(-1, 1);
-  canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+  videoCtx.save();
+  videoCtx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
+  videoCtx.translate(videoCanvas.width, 0);
+  videoCtx.scale(-1, 1);
+
+  if (results.image) {
+    videoCtx.drawImage(results.image, 0, 0, videoCanvas.width, videoCanvas.height);
+  }
 
   if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
     const landmarks = results.multiHandLandmarks[0];
 
-    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
-    drawLandmarks(canvasCtx, landmarks, { color: '#FF0000', lineWidth: 1 });
+    drawConnectors(videoCtx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
+    drawLandmarks(videoCtx, landmarks, { color: '#FF0000', lineWidth: 1 });
 
-    // Detect static gesture
-    const staticGesture = detectStaticGesture(landmarks);
-    if (staticGesture) gestureName = staticGesture;
+    const indexTip = landmarks[8]; // index fingertip
+    const thumbTip = landmarks[4]; // thumb tip
 
-    // Reset transform to show text properly
-    canvasCtx.setTransform(1, 0, 0, 1, 0, 0);
-    canvasCtx.font = "24px Arial";
-    canvasCtx.fillStyle = "cyan";
-    canvasCtx.fillText(`Gesture: ${gestureName}`, 10, 30);
+    const dist = Math.hypot(
+      (indexTip.x - thumbTip.x) * videoCanvas.width,
+      (indexTip.y - thumbTip.y) * videoCanvas.height
+    );
+
+    // If thumb and index are close, stop drawing
+    isDrawing = dist > 40;
+
+    const x = (1 - indexTip.x) * drawCanvas.width;
+    const y = indexTip.y * drawCanvas.height;
+
+    if (isDrawing) {
+      videoCtx.setTransform(1, 0, 0, 1, 0, 0);
+      videoCtx.font = "20px Arial";
+      videoCtx.fillStyle = "lime";
+      videoCtx.fillText("✍️ Drawing Mode", 10, 30);
+
+      if (lastX != null && lastY != null) {
+        drawCtx.strokeStyle = "#00FFFF";
+        drawCtx.lineWidth = 3;
+        drawCtx.beginPath();
+        drawCtx.moveTo(lastX, lastY);
+        drawCtx.lineTo(x, y);
+        drawCtx.stroke();
+      }
+
+      lastX = x;
+      lastY = y;
+    } else {
+      lastX = null;
+      lastY = null;
+    }
+  } else {
+    lastX = null;
+    lastY = null;
   }
 
-  canvasCtx.restore();
+  videoCtx.restore();
 });
 
-// Static gesture recognizer
-function detectStaticGesture(landmarks) {
-  const isFingerUp = (tip, pip) => landmarks[tip].y < landmarks[pip].y;
-
-  const indexUp = isFingerUp(8, 6);
-  const middleUp = isFingerUp(12, 10);
-  const ringUp = isFingerUp(16, 14);
-  const pinkyUp = isFingerUp(20, 18);
-  const thumbOut = Math.abs(landmarks[4].x - landmarks[3].x) > 0.04;
-
-  if (indexUp && middleUp && !ringUp && !pinkyUp) return "✌️ Peace";
-  if (thumbOut && !indexUp && !middleUp && !ringUp && !pinkyUp) return "👍 Thumbs Up";
-  if (indexUp && !middleUp && !ringUp && !pinkyUp) return "👆 One Finger";
-  if (!indexUp && !middleUp && !ringUp && !pinkyUp && !thumbOut) return "✊ Fist";
-
-  return null;
+function clearGesture() {
+  drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
 }
 
 const camera = new Camera(videoElement, {
